@@ -27,6 +27,14 @@
   /* bez wbudowanych strzałek góra/dół w polach liczbowych */
   .daysIn{-moz-appearance:textfield;appearance:textfield}
   .daysIn::-webkit-outer-spin-button,.daysIn::-webkit-inner-spin-button{-webkit-appearance:none;margin:0}
+  /* grupa [−][pole][+]: elementy przylegają do siebie bez odstępów i paddingu */
+  .spin{display:flex}
+  .spin button,.spin .daysIn{height:44px;margin:0;padding:0;border:1px solid #374151;border-radius:0;box-sizing:border-box}
+  .spin .daysIn,.spin button:last-child{margin-left:-1px}
+  .spin button:first-child{border-radius:8px 0 0 8px}
+  .spin button:last-child{border-radius:0 8px 8px 0}
+  .spin button:hover,.spin .daysIn:focus{position:relative;z-index:1}
+  .spin button:active{transform:none;background:#1d4ed8}
   .presets{display:flex;gap:6px;flex-wrap:wrap}
   .presets button{height:36px;padding:0 12px;font-size:14px;border:1px solid #374151;border-radius:8px;background:#111827;color:#e5e7eb;cursor:pointer}
   .presets button:hover,.presets button.on{background:#2563eb;border-color:#2563eb}
@@ -64,14 +72,20 @@
   <div class="controls">
     <div class="stepper">
       <span class="lbl">Ostatnie dni</span>
-      <button id="dPrev" title="Mniej o 1 (↓)">−</button>
-      <input class="daysIn" id="daysIn" type="number" min="1" max="3650" value="30">
-      <button id="dNext" title="Więcej o 1 (↑)">+</button>
+      <div class="spin">
+        <button id="dPrev" title="Mniej o 1">−</button>
+        <input class="daysIn" id="daysIn" type="number" min="1" max="3650" value="30">
+        <button id="dNext" title="Więcej o 1">+</button>
+      </div>
     </div>
     <div class="presets" id="presets"></div>
     <div class="stepper">
       <span class="lbl">Wskaźnik [°C]</span>
-      <input class="daysIn" id="thrIn" type="number" step="0.5" value="10" style="width:90px">
+      <div class="spin">
+        <button id="tPrev" title="Mniej o 0,5">−</button>
+        <input class="daysIn" id="thrIn" type="number" step="0.5" value="10" style="width:90px">
+        <button id="tNext" title="Więcej o 0,5">+</button>
+      </div>
     </div>
   </div>
   <div id="status"></div>
@@ -320,6 +334,14 @@ $('thrIn').addEventListener('input', () => {
   THR = t === '' ? NaN : Number(t);
   updateUrl(); draw();
 });
+const THR_STEP = 0.5;
+function stepThr(d){
+  THR = Math.round(((isNaN(THR) ? 0 : THR) + d) * 10) / 10;
+  $('thrIn').value = THR;
+  updateUrl(); draw();
+}
+$('tPrev').onclick = () => stepThr(-THR_STEP);
+$('tNext').onclick = () => stepThr(THR_STEP);
 
 setN(N);
 </script>
