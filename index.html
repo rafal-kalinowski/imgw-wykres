@@ -3,6 +3,9 @@
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
+<meta http-equiv="Cache-Control" content="no-cache, no-store, must-revalidate">
+<meta http-equiv="Pragma" content="no-cache">
+<meta http-equiv="Expires" content="0">
 <title>IMGW – wykres temperatury</title>
 <style>
   body{font-family:system-ui,sans-serif;background:#111827;color:#e5e7eb;margin:0;padding:20px}
@@ -37,6 +40,8 @@
   .legend span{display:inline-flex;align-items:center;margin-right:16px;font-size:13px}
   .legend i{width:14px;height:4px;border-radius:2px;margin-right:6px;display:inline-block}
   canvas{touch-action:pan-y}
+  body{position:relative}
+  #ver{position:absolute;top:3px;right:8px;font-size:10px;line-height:1;color:#6b7280;font-variant-numeric:tabular-nums;pointer-events:none}
   @media (max-width:600px){
     body{padding:10px}
     h1{font-size:16px}
@@ -49,6 +54,7 @@
 </style>
 </head>
 <body>
+<div id="ver"></div>
 <h1>IMGW – Warszawa-Okęcie: temperatura min / średnia / max – ostatnie dni</h1>
 
 <div class="box">
@@ -76,6 +82,25 @@
 </div>
 
 <script>
+// Wersja strony (czas warszawski). Zmieniana przy każdej publikacji.
+const VERSION = '2026-10-25 05:09';
+document.getElementById('ver').textContent = 'v' + VERSION;
+
+// GitHub Pages pozwala cache'ować plik do 10 min i nie da się tego zmienić nagłówkami.
+// Dlatego strona sama pyta serwer o swoją najnowszą wersję i przeładowuje się, gdy jest nowsza.
+(async () => {
+  if (location.protocol === 'file:') return;
+  try {
+    const r = await fetch(location.origin + location.pathname + '?v=' + Date.now(), {cache: 'no-store'});
+    const m = (await r.text()).match(/const VERSION = '([^']+)'/);
+    if (!m || m[1] === VERSION) return;
+    // zabezpieczenie przed pętlą, gdyby CDN nadal oddawał starą wersję
+    try { if (sessionStorage.getItem('reloadedFor') === m[1]) return; sessionStorage.setItem('reloadedFor', m[1]); } catch (e) {}
+    const u = new URL(location.href); u.searchParams.set('_', Date.now());
+    location.replace(u.toString());
+  } catch (e) {}
+})();
+
 const BASE = 'https://rafalraczynski.com.pl/imgw/imgw-cala-polska-archiwum/getJSON.php';
 const PROVINCE = 14;
 const PLACE = 352200375;
