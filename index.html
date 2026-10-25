@@ -101,34 +101,15 @@ const cache = new Map();          // 'YYYY-MM' -> Promise<days[]>
 const pad = n => String(n).padStart(2,'0');
 const iso = d => `${d.getFullYear()}-${pad(d.getMonth()+1)}-${pad(d.getDate())}`;
 
-// Kolejne drogi do danych: najpierw bezpośrednio, potem przez publiczne proxy CORS.
-// Działająca droga jest zapamiętywana i używana jako pierwsza przy kolejnych zapytaniach.
-const ROUTES = [
-  {name:'bezpośrednio',      wrap: u => u},
-  {name:'corsproxy.io',      wrap: u => 'https://corsproxy.io/?url=' + encodeURIComponent(u)},
-  {name:'allorigins',        wrap: u => 'https://api.allorigins.win/raw?url=' + encodeURIComponent(u)},
-  {name:'codetabs',          wrap: u => 'https://api.codetabs.com/v1/proxy?quest=' + encodeURIComponent(u)},
-];
-let routeIdx = 0;
-let lastRoute = null;
-
 async function fetchJSON(url){
-  const errors = [];
-  for (let k = 0; k < ROUTES.length; k++) {
-    const idx = (routeIdx + k) % ROUTES.length, route = ROUTES[idx];
-    try {
-      const ctl = new AbortController(), t = setTimeout(() => ctl.abort(), 15000);
-      const r = await fetch(route.wrap(url), {signal: ctl.signal});
-      clearTimeout(t);
-      if (!r.ok) throw new Error('HTTP ' + r.status);
-      const j = JSON.parse(await r.text());
-      routeIdx = idx; lastRoute = route.name;
-      return j;
-    } catch (e) {
-      errors.push(`${route.name}: ${e.name === 'AbortError' ? 'timeout' : e.message}`);
-    }
-  }
-  throw new Error(errors.join(' | '));
+  const ctl = new AbortController(), t = setTimeout(() => ctl.abort(), 15000);
+  try {
+    const r = await fetch(url, {signal: ctl.signal});
+    if (!r.ok) throw new Error('HTTP ' + r.status);
+    return JSON.parse(await r.text());
+  } catch (e) {
+    throw new Error(e.name === 'AbortError' ? 'timeout' : e.message);
+  } finally { clearTimeout(t); }
 }
 
 function fetchMonth(year, month){
@@ -205,7 +186,6 @@ async function load(){
   const dayOf = (fld, v) => (days.find(d => val(d, fld) === v) || {}).day;
   const hi = Math.max(...mx), lo = Math.min(...mn), mean = av.reduce((a,b)=>a+b,0)/av.length;
   status(`${days.length} z ${N} dni z danymi (${days[0].day} → ${days[days.length-1].day}).` +
-         (lastRoute ? ` Źródło: ${lastRoute}.` : '') +
          (errs ? ` Nie udało się pobrać ${errs} mies.` : ''), errs > 0);
   $('stats').innerHTML =
     `<span style="color:#ef4444">max ${hi}°</span> (${dayOf('tempMax', hi)}) &nbsp;·&nbsp; ` +
