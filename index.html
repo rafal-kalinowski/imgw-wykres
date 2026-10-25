@@ -1,0 +1,317 @@
+<!DOCTYPE html>
+<html lang="pl">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>IMGW – wykres temperatury</title>
+<style>
+  body{font-family:system-ui,sans-serif;background:#111827;color:#e5e7eb;margin:0;padding:20px}
+  h1{font-size:20px;margin:0 0 12px}
+  .box{background:#1f2937;border-radius:10px;padding:14px;margin-bottom:14px}
+  .controls{display:flex;flex-wrap:wrap;gap:24px;align-items:center}
+  .stepper{display:flex;align-items:center;gap:6px}
+  .stepper .lbl{font-size:13px;color:#9ca3af;margin-right:6px}
+  .stepper button{width:44px;height:44px;font-size:22px;line-height:1;border:1px solid #374151;border-radius:8px;
+                  background:#111827;color:#e5e7eb;cursor:pointer;user-select:none}
+  .stepper button:hover{background:#2563eb;border-color:#2563eb}
+  .stepper button:active{transform:scale(.95)}
+  .stepper .val{min-width:130px;height:44px;display:flex;align-items:center;justify-content:center;
+                font-size:18px;font-weight:600;background:#0b1220;border-radius:8px;border:1px solid #374151}
+  .stepper.year .val{min-width:80px}
+  .daysIn{width:110px;height:44px;font-size:18px;font-weight:600;text-align:center;background:#0b1220;color:#e5e7eb;
+           border:1px solid #374151;border-radius:8px}
+  .daysIn:focus{outline:none;border-color:#2563eb}
+  .presets{display:flex;gap:6px;flex-wrap:wrap}
+  .presets button{height:36px;padding:0 12px;font-size:14px;border:1px solid #374151;border-radius:8px;background:#111827;color:#e5e7eb;cursor:pointer}
+  .presets button:hover,.presets button.on{background:#2563eb;border-color:#2563eb}
+  #months{display:flex;flex-wrap:wrap;gap:6px;margin-top:10px}
+  #months span{font-size:12px;padding:3px 8px;border-radius:999px;background:#0b1220;border:1px solid #374151;color:#9ca3af}
+  #months span.ok{color:#86efac;border-color:#166534}
+  #months span.err{color:#f87171;border-color:#7f1d1d}
+  #months span.load{color:#facc15;border-color:#713f12}
+  #stats{font-size:13px;margin-top:8px;color:#e5e7eb}
+  #status{font-size:13px;color:#9ca3af;margin-top:10px;min-height:18px}
+  #wrap{position:relative}
+  canvas{width:100%;height:460px;display:block;background:#0b1220;border-radius:10px}
+  #tip{position:absolute;pointer-events:none;background:#000c;padding:6px 8px;border-radius:6px;font-size:12px;display:none;white-space:nowrap}
+  .legend span{display:inline-flex;align-items:center;margin-right:16px;font-size:13px}
+  .legend i{width:14px;height:4px;border-radius:2px;margin-right:6px;display:inline-block}
+  canvas{touch-action:pan-y}
+  @media (max-width:600px){
+    body{padding:10px}
+    h1{font-size:16px}
+    .box{padding:10px}
+    .controls{gap:12px}
+    .presets button{height:34px;padding:0 9px;font-size:13px}
+    canvas{height:340px}
+    .legend span{margin-right:10px;font-size:12px}
+  }
+</style>
+</head>
+<body>
+<h1>IMGW – Warszawa-Okęcie: temperatura min / średnia / max – ostatnie dni</h1>
+
+<div class="box">
+  <div class="controls">
+    <div class="stepper">
+      <span class="lbl">Ostatnie dni</span>
+      <button id="dPrev" title="Mniej o 1 (↓)">−</button>
+      <input class="daysIn" id="daysIn" type="number" min="1" max="3650" value="30">
+      <button id="dNext" title="Więcej o 1 (↑)">+</button>
+    </div>
+    <div class="presets" id="presets"></div>
+    <div class="stepper">
+      <span class="lbl">Wskaźnik [°C]</span>
+      <input class="daysIn" id="thrIn" type="number" step="0.5" value="10" style="width:90px">
+    </div>
+  </div>
+  <div id="status"></div>
+  <div id="stats"></div>
+  <div id="months"></div>
+</div>
+
+<div class="box">
+  <div class="legend" id="legend"></div>
+  <div id="wrap"><canvas id="cv"></canvas><div id="tip"></div></div>
+</div>
+
+<script>
+const BASE = 'https://rafalraczynski.com.pl/imgw/imgw-cala-polska-archiwum/getJSON.php';
+const PROVINCE = 14;
+const PLACE = 352200375;
+const MONTHS = ['Styczeń','Luty','Marzec','Kwiecień','Maj','Czerwiec','Lipiec','Sierpień','Wrzesień','Październik','Listopad','Grudzień'];
+const $ = id => document.getElementById(id);
+
+let N = Number(new URLSearchParams(location.search).get('days')) || 30;
+const _qs = new URLSearchParams(location.search);
+let THR = _qs.has('x') && _qs.get('x') !== '' && isFinite(Number(_qs.get('x'))) ? Number(_qs.get('x')) : 10;
+const PRESETS = [7, 14, 30, 60, 90, 180, 365];
+
+const LINES = [
+  {field:'tempMax', name:'Temperatura max [°C]',     color:'#ef4444'},
+  {field:'tempAvg', name:'Temperatura średnia [°C]', color:'#facc15'},
+  {field:'tempMin', name:'Temperatura min [°C]',     color:'#38bdf8'},
+];
+
+let days = [];
+const status = (t, err) => { $('status').textContent = t; $('status').style.color = err ? '#f87171' : '#9ca3af'; };
+const val = (d, f) => (d[f] === null || d[f] === undefined) ? NaN : Number(d[f]);
+
+const cache = new Map();          // 'YYYY-MM' -> Promise<days[]>
+const pad = n => String(n).padStart(2,'0');
+const iso = d => `${d.getFullYear()}-${pad(d.getMonth()+1)}-${pad(d.getDate())}`;
+
+// Kolejne drogi do danych: najpierw bezpośrednio, potem przez publiczne proxy CORS.
+// Działająca droga jest zapamiętywana i używana jako pierwsza przy kolejnych zapytaniach.
+const ROUTES = [
+  {name:'bezpośrednio',      wrap: u => u},
+  {name:'corsproxy.io',      wrap: u => 'https://corsproxy.io/?url=' + encodeURIComponent(u)},
+  {name:'allorigins',        wrap: u => 'https://api.allorigins.win/raw?url=' + encodeURIComponent(u)},
+  {name:'codetabs',          wrap: u => 'https://api.codetabs.com/v1/proxy?quest=' + encodeURIComponent(u)},
+];
+let routeIdx = 0;
+let lastRoute = null;
+
+async function fetchJSON(url){
+  const errors = [];
+  for (let k = 0; k < ROUTES.length; k++) {
+    const idx = (routeIdx + k) % ROUTES.length, route = ROUTES[idx];
+    try {
+      const ctl = new AbortController(), t = setTimeout(() => ctl.abort(), 15000);
+      const r = await fetch(route.wrap(url), {signal: ctl.signal});
+      clearTimeout(t);
+      if (!r.ok) throw new Error('HTTP ' + r.status);
+      const j = JSON.parse(await r.text());
+      routeIdx = idx; lastRoute = route.name;
+      return j;
+    } catch (e) {
+      errors.push(`${route.name}: ${e.name === 'AbortError' ? 'timeout' : e.message}`);
+    }
+  }
+  throw new Error(errors.join(' | '));
+}
+
+function fetchMonth(year, month){
+  const key = `${year}-${pad(month)}`;
+  if (!cache.has(key)) {
+    const q = new URLSearchParams({mode:'table', type:'month', province:PROVINCE, pleace:PLACE, month, year});
+    const p = fetchJSON(BASE + '?' + q)
+      .then(j => (j.daysData || []).filter(d => d.day));
+    p.catch(() => cache.delete(key));   // błędy nie zostają w cache
+    cache.set(key, p);
+  }
+  return cache.get(key);
+}
+
+// lista miesięcy potrzebnych do pokrycia zakresu [from, to]
+function monthsBetween(from, to){
+  const out = []; let y = from.getFullYear(), m = from.getMonth()+1;
+  while (y < to.getFullYear() || (y === to.getFullYear() && m <= to.getMonth()+1)) {
+    out.push({year:y, month:m}); if (++m > 12) { m = 1; y++; }
+  }
+  return out;
+}
+
+function setN(v){
+  v = Math.round(Number(v));
+  if (!isFinite(v) || v < 1) v = 1;
+  if (v > 3650) v = 3650;
+  N = v; $('daysIn').value = v;
+  [...$('presets').children].forEach(b => b.classList.toggle('on', Number(b.dataset.n) === v));
+  updateUrl();
+  load();
+}
+
+function updateUrl(){ history.replaceState(null, '', `?days=${N}` + (isNaN(THR) ? '' : `&x=${THR}`)); }
+
+function renderMonths(list){
+  $('months').innerHTML = `<span style="color:#e5e7eb;border:none;background:none;padding-left:0">Pobrane miesiące (${list.length}):</span>` +
+    list.map(x => `<span class="${x.st}" title="${x.info||''}">${MONTHS[x.month-1].slice(0,3)} ${x.year}${x.cnt!=null ? ' · ' + x.cnt + ' dni' : ''}</span>`).join('');
+}
+
+let reqId = 0;
+async function load(){
+  const id = ++reqId;
+  const to = new Date(); to.setHours(0,0,0,0);
+  const from = new Date(to); from.setDate(from.getDate() - (N - 1));
+  const list = monthsBetween(from, to).map(x => ({...x, st:'load'}));
+  renderMonths(list);
+  status(`Pobieram dane: ${N} dni (${iso(from)} → ${iso(to)}), potrzeba ${list.length} ${list.length===1?'miesiąca':'miesięcy'}...`);
+  $('stats').textContent = '';
+
+  const results = await Promise.all(list.map((x, i) =>
+    fetchMonth(x.year, x.month)
+      .then(d => { x.st = 'ok'; x.cnt = d.length; if (id === reqId) renderMonths(list); return d; })
+      .catch(e => { x.st = 'err'; x.info = e.message; if (id === reqId) renderMonths(list); return []; })
+  ));
+  if (id !== reqId) return;
+
+  const f = iso(from), t = iso(to);
+  const seen = new Set();
+  days = results.flat()
+    .filter(d => d.day >= f && d.day <= t && !seen.has(d.day) && seen.add(d.day))
+    .sort((a,b) => a.day.localeCompare(b.day));
+
+  const errs = list.filter(x => x.st === 'err').length;
+  if (!days.length) {
+    draw();
+    const firstErr = (list.find(x => x.info) || {}).info;
+    status('Błąd: brak danych dla wybranego zakresu.' + (firstErr ? ' Szczegóły: ' + firstErr : ''), true);
+    return;
+  }
+
+  const agg = fn => { const v = days.map(d => val(d, fn)).filter(x => !isNaN(x)); return v; };
+  const mx = agg('tempMax'), mn = agg('tempMin'), av = agg('tempAvg');
+  const dayOf = (fld, v) => (days.find(d => val(d, fld) === v) || {}).day;
+  const hi = Math.max(...mx), lo = Math.min(...mn), mean = av.reduce((a,b)=>a+b,0)/av.length;
+  status(`${days.length} z ${N} dni z danymi (${days[0].day} → ${days[days.length-1].day}).` +
+         (lastRoute ? ` Źródło: ${lastRoute}.` : '') +
+         (errs ? ` Nie udało się pobrać ${errs} mies.` : ''), errs > 0);
+  $('stats').innerHTML =
+    `<span style="color:#ef4444">max ${hi}°</span> (${dayOf('tempMax', hi)}) &nbsp;·&nbsp; ` +
+    `<span style="color:#38bdf8">min ${lo}°</span> (${dayOf('tempMin', lo)}) &nbsp;·&nbsp; ` +
+    `<span style="color:#facc15">średnia ${mean.toFixed(1)}°</span>`;
+  $('legend').innerHTML = LINES.map(l => `<span><i style="background:${l.color}"></i>${l.name}</span>`).join('');
+  draw();
+}
+
+const cv = $('cv'), ctx = cv.getContext('2d');
+let geom = null;
+
+function draw(hover){
+  const dpr = window.devicePixelRatio || 1, W = cv.clientWidth, H = cv.clientHeight;
+  cv.width = W*dpr; cv.height = H*dpr; ctx.setTransform(dpr,0,0,dpr,0,0); ctx.clearRect(0,0,W,H);
+  if (!days.length) return;
+
+  const m = {l:50, r:20, t:20, b:45}, n = days.length;
+  const all = LINES.flatMap(l => days.map(d => val(d, l.field))).filter(v => !isNaN(v));
+  if (!isNaN(THR)) all.push(THR);
+  const lo = Math.floor(Math.min(...all) - 1), hi = Math.ceil(Math.max(...all) + 1);
+  const X = i => m.l + (n === 1 ? 0 : i*(W-m.l-m.r)/(n-1));
+  const Y = v => m.t + (hi-v)*(H-m.t-m.b)/(hi-lo);
+  geom = {m, W, n};
+
+  ctx.font = '12px system-ui'; ctx.textAlign = 'right'; ctx.lineWidth = 1;
+  const step = Math.max(1, Math.round((hi-lo)/8));
+  for (let v = Math.ceil(lo/step)*step; v <= hi; v += step) {
+    ctx.strokeStyle = '#1f2937'; ctx.beginPath(); ctx.moveTo(m.l,Y(v)); ctx.lineTo(W-m.r,Y(v)); ctx.stroke();
+    ctx.fillStyle = '#9ca3af'; ctx.fillText(v + '°', m.l-6, Y(v)+4);
+  }
+  ctx.textAlign = 'center'; ctx.fillStyle = '#9ca3af';
+  const every = Math.max(1, Math.ceil(n / Math.max(3, Math.min(15, Math.floor((W-m.l-m.r)/55)))));
+  for (let i = 0; i < n; i += every) ctx.fillText(days[0].day.slice(0,4) !== days[n-1].day.slice(0,4) ? days[i].day.slice(2) : days[i].day.slice(5), X(i), H-m.b+18);
+
+  if (!isNaN(THR)) {
+    ctx.save(); ctx.strokeStyle = '#ffffff'; ctx.lineWidth = 1.5; ctx.setLineDash([6,5]);
+    ctx.beginPath(); ctx.moveTo(m.l, Y(THR)); ctx.lineTo(W-m.r, Y(THR)); ctx.stroke(); ctx.restore();
+    ctx.fillStyle = '#ffffff'; ctx.textAlign = 'right'; ctx.font = '600 12px system-ui';
+    ctx.fillText(THR + '°', W-m.r-4, Y(THR) - 5); ctx.font = '12px system-ui';
+  }
+
+  LINES.forEach(l => {
+    ctx.strokeStyle = l.color; ctx.fillStyle = l.color; ctx.lineWidth = 2; ctx.beginPath();
+    let on = false;
+    days.forEach((d,i) => {
+      const v = val(d, l.field);
+      if (isNaN(v)) { on = false; return; }
+      on ? ctx.lineTo(X(i),Y(v)) : ctx.moveTo(X(i),Y(v)); on = true;
+    });
+    ctx.stroke();
+    days.forEach((d,i) => { const v = val(d, l.field); if (!isNaN(v)) { ctx.beginPath(); ctx.arc(X(i),Y(v),n>120?1.2:2.5,0,7); ctx.fill(); } });
+  });
+
+  if (hover != null) {
+    ctx.strokeStyle = '#6b7280'; ctx.lineWidth = 1; ctx.beginPath(); ctx.moveTo(X(hover),m.t); ctx.lineTo(X(hover),H-m.b); ctx.stroke();
+    LINES.forEach(l => { const v = val(days[hover], l.field); if (!isNaN(v)) { ctx.fillStyle = l.color; ctx.beginPath(); ctx.arc(X(hover),Y(v),5,0,7); ctx.fill(); } });
+  }
+}
+
+function showTip(e){
+  if (!days.length || !geom) return;
+  const r = cv.getBoundingClientRect(), x = e.clientX - r.left, y = e.clientY - r.top, {m,W,n} = geom;
+  const i = Math.max(0, Math.min(n-1, Math.round((x-m.l)/((W-m.l-m.r)/Math.max(1,n-1)))));
+  draw(i);
+  const tip = $('tip');
+  tip.innerHTML = `<b>${days[i].day}</b><br>` + LINES.map(l => {
+    const v = val(days[i], l.field);
+    return `<span style="color:${l.color}">●</span> ${l.name}: ${isNaN(v) ? '–' : v}`;
+  }).join('<br>');
+  tip.style.display = 'block';
+  const tw = tip.offsetWidth, th = tip.offsetHeight;
+  // na dotyku dymek nad palcem, przy myszy obok kursora
+  let left = e.pointerType === 'touch' ? x - tw/2 : x + 14;
+  let top  = e.pointerType === 'touch' ? y - th - 24 : y + 10;
+  if (left + tw > r.width) left = x - tw - 14;
+  left = Math.max(4, Math.min(left, r.width - tw - 4));
+  top = Math.max(4, Math.min(top, r.height - th - 4));
+  tip.style.left = left + 'px';
+  tip.style.top = top + 'px';
+}
+function hideTip(){ $('tip').style.display = 'none'; draw(); }
+
+cv.addEventListener('pointermove', e => { if (e.pointerType !== 'touch' || e.buttons) showTip(e); });
+cv.addEventListener('pointerdown', e => { showTip(e); });
+cv.addEventListener('pointerleave', e => { if (e.pointerType !== 'touch') hideTip(); });
+// dotknięcie poza wykresem chowa dymek
+document.addEventListener('pointerdown', e => { if (e.target !== cv) hideTip(); });
+window.addEventListener('resize', () => draw());
+
+$('presets').innerHTML = PRESETS.map(n => `<button data-n="${n}">${n} dni</button>`).join('');
+$('presets').onclick = e => { if (e.target.dataset.n) setN(e.target.dataset.n); };
+$('dPrev').onclick = () => setN(N - 1);
+$('dNext').onclick = () => setN(N + 1);
+let deb;
+$('daysIn').addEventListener('input', () => { clearTimeout(deb); deb = setTimeout(() => { if ($('daysIn').value) setN($('daysIn').value); }, 500); });
+$('daysIn').addEventListener('keydown', e => { if (e.key === 'Enter') { clearTimeout(deb); setN($('daysIn').value); } });
+
+$('thrIn').value = THR;
+$('thrIn').addEventListener('input', () => {
+  const t = $('thrIn').value.replace(',', '.');
+  THR = t === '' ? NaN : Number(t);
+  updateUrl(); draw();
+});
+
+setN(N);
+</script>
+</body>
+</html>
