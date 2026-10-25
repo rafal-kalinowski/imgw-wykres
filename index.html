@@ -24,6 +24,9 @@
   .daysIn{width:110px;height:44px;font-size:18px;font-weight:600;text-align:center;background:#0b1220;color:#e5e7eb;
            border:1px solid #374151;border-radius:8px}
   .daysIn:focus{outline:none;border-color:#2563eb}
+  /* bez wbudowanych strzałek góra/dół w polach liczbowych */
+  .daysIn{-moz-appearance:textfield;appearance:textfield}
+  .daysIn::-webkit-outer-spin-button,.daysIn::-webkit-inner-spin-button{-webkit-appearance:none;margin:0}
   .presets{display:flex;gap:6px;flex-wrap:wrap}
   .presets button{height:36px;padding:0 12px;font-size:14px;border:1px solid #374151;border-radius:8px;background:#111827;color:#e5e7eb;cursor:pointer}
   .presets button:hover,.presets button.on{background:#2563eb;border-color:#2563eb}
