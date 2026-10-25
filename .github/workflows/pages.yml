@@ -28,7 +28,9 @@ jobs:
           mkdir _site
           cp index.html _site/
           STAMP=$(TZ=Europe/Warsaw date '+%Y-%m-%d %H:%M')
-          sed -i "s/^const VERSION = '[^']*';/const VERSION = '${STAMP}';/" _site/index.html
+          sed -i "s/^const VERSION = 'VERSION_TAG';/const VERSION = '${STAMP}';/" _site/index.html
+          # jeśli znacznik nie został podmieniony, przerwij publikację zamiast wdrożyć stronę bez wersji
+          grep -q "^const VERSION = '${STAMP}';" _site/index.html
           grep -n "^const VERSION" _site/index.html
 
       - uses: actions/configure-pages@v5

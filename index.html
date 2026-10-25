@@ -82,9 +82,11 @@
 </div>
 
 <script>
-// Wersja strony (czas warszawski). Zmieniana przy każdej publikacji.
-const VERSION = '2026-10-25 05:09';
-document.getElementById('ver').textContent = 'v' + VERSION;
+// Wersja strony. W repozytorium stoi tu znacznik VERSION_TAG, a workflow GitHub Actions
+// (.github/workflows/pages.yml) podmienia go przy publikacji na datę i czas wdrożenia (czas warszawski).
+// Przy otwarciu pliku z dysku znacznik zostaje, więc pokazujemy 'dev'.
+const VERSION = 'VERSION_TAG';
+document.getElementById('ver').textContent = VERSION === 'VERSION_TAG' ? 'dev' : 'v' + VERSION;
 
 // GitHub Pages pozwala cache'ować plik do 10 min i nie da się tego zmienić nagłówkami.
 // Dlatego strona sama pyta serwer o swoją najnowszą wersję i przeładowuje się, gdy jest nowsza.
