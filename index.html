@@ -37,6 +37,18 @@
   .spin button:active{transform:none;background:#1d4ed8}
   .cmp{display:flex;align-items:center;gap:8px;font-size:14px;cursor:pointer;user-select:none;min-height:44px}
   .cmp input{width:20px;height:20px;margin:0;accent-color:#2563eb;cursor:pointer}
+  .series{display:flex}
+  .series[hidden]{display:none}
+  .series label{position:relative;cursor:pointer}
+  .series input{position:absolute;opacity:0;width:0;height:0}
+  .series span{display:flex;align-items:center;gap:6px;height:44px;padding:0 14px;font-size:14px;
+               border:1px solid #374151;background:#111827;color:#9ca3af;user-select:none}
+  .series label + label span{margin-left:-1px}
+  .series label:first-child span{border-radius:8px 0 0 8px}
+  .series label:last-child span{border-radius:0 8px 8px 0}
+  .series i{width:12px;height:4px;border-radius:2px;display:inline-block}
+  .series input:checked + span{background:#2563eb;border-color:#2563eb;color:#fff;position:relative;z-index:1}
+  .series input:focus-visible + span{outline:2px solid #60a5fa;outline-offset:2px}
   #cmpStatus{font-size:12px;color:#9ca3af;margin-top:4px;min-height:16px}
   .presets{display:flex;gap:6px;flex-wrap:wrap}
   .presets button{height:36px;padding:0 12px;font-size:14px;border:1px solid #374151;border-radius:8px;background:#111827;color:#e5e7eb;cursor:pointer}
@@ -91,6 +103,11 @@
       </div>
     </div>
     <label class="cmp"><input type="checkbox" id="cmpIn"> Porównaj z poprzednim rokiem</label>
+    <div class="series" id="seriesBox" role="radiogroup" aria-label="Seria do porównania" hidden>
+      <label><input type="radio" name="series" value="tempMin"><span><i style="background:#38bdf8"></i>min</span></label>
+      <label><input type="radio" name="series" value="tempAvg"><span><i style="background:#facc15"></i>średnia</span></label>
+      <label><input type="radio" name="series" value="tempMax"><span><i style="background:#ef4444"></i>max</span></label>
+    </div>
   </div>
   <div id="status"></div>
   <div id="cmpStatus"></div>
@@ -136,6 +153,10 @@ const _qs = new URLSearchParams(location.search);
 let THR = _qs.has('x') && _qs.get('x') !== '' && isFinite(Number(_qs.get('x'))) ? Number(_qs.get('x')) : 10;
 const PRESETS = [7, 14, 30, 60, 90, 180, 365];
 let CMP = _qs.get('cmp') === '1';   // porównanie z rokiem wcześniejszym
+const SERIES = {min:'tempMin', avg:'tempAvg', max:'tempMax'};
+let FIELD = SERIES[_qs.get('s')] || 'tempAvg';   // seria widoczna w trybie porównania (domyślnie średnia)
+// w trybie porównania pokazujemy tylko jedną serię, inaczej wszystkie trzy
+const shown = () => CMP ? LINES.filter(l => l.field === FIELD) : LINES;
 let prev = null;                    // tablica równoległa do days: dane z tego samego dnia rok wcześniej
 
 const LINES = [
@@ -194,7 +215,7 @@ function setN(v){
   load();
 }
 
-function updateUrl(){ history.replaceState(null, '', `?days=${N}` + (isNaN(THR) ? '' : `&x=${THR}`) + (CMP ? '&cmp=1' : '')); }
+function updateUrl(){ history.replaceState(null, '', `?days=${N}` + (isNaN(THR) ? '' : `&x=${THR}`) + (CMP ? '&cmp=1&s=' + Object.keys(SERIES).find(k => SERIES[k] === FIELD) : '')); }
 
 // ten sam dzień kalendarzowy rok wcześniej (29 lutego -> 28 lutego)
 function prevKey(day){
@@ -204,8 +225,8 @@ function prevKey(day){
 const parseISO = k => { const [y,m,d] = k.split('-').map(Number); return new Date(y, m-1, d); };
 
 function renderLegend(){
-  $('legend').innerHTML = LINES.map(l => `<span><i style="background:${l.color}"></i>${l.name}</span>`).join('') +
-    (CMP ? `<span style="opacity:.55"><i style="background:#ef4444;width:5px;margin-right:2px"></i><i style="background:#facc15;width:5px;margin-right:2px"></i><i style="background:#38bdf8;width:5px"></i>&nbsp;rok wcześniej</span>` : '');
+  $('legend').innerHTML = shown().map(l => `<span><i style="background:${l.color}"></i>${l.name}</span>` +
+    (CMP ? `<span style="opacity:.45"><i style="background:${l.color}"></i>${l.name.replace(' [°C]', '')} rok wcześniej</span>` : '')).join('');
 }
 
 // pobiera dane sprzed roku dla bieżącego zakresu i ustawia 'prev' (wyrównane indeksami do 'days')
@@ -291,8 +312,8 @@ function draw(hover){
   if (!days.length) return;
 
   const m = {l:50, r:20, t:20, b:45}, n = days.length;
-  const all = LINES.flatMap(l => days.map(d => val(d, l.field))).filter(v => !isNaN(v));
-  if (CMP && prev) LINES.forEach(l => prev.forEach(d => { const v = d ? val(d, l.field) : NaN; if (!isNaN(v)) all.push(v); }));
+  const all = shown().flatMap(l => days.map(d => val(d, l.field))).filter(v => !isNaN(v));
+  if (CMP && prev) shown().forEach(l => prev.forEach(d => { const v = d ? val(d, l.field) : NaN; if (!isNaN(v)) all.push(v); }));
   if (!isNaN(THR)) all.push(THR);
   const lo = Math.floor(Math.min(...all) - 1), hi = Math.ceil(Math.max(...all) + 1);
   const X = i => m.l + (n === 1 ? 0 : i*(W-m.l-m.r)/(n-1));
@@ -319,7 +340,7 @@ function draw(hover){
   // rok wcześniej: te same kolory, półprzezroczyste, pod liniami bieżącymi
   if (CMP && prev) {
     ctx.save(); ctx.globalAlpha = 0.4;
-    LINES.forEach(l => {
+    shown().forEach(l => {
       ctx.strokeStyle = l.color; ctx.fillStyle = l.color; ctx.lineWidth = 2; ctx.beginPath();
       let on = false;
       prev.forEach((d,i) => {
@@ -332,7 +353,7 @@ function draw(hover){
     ctx.restore();
   }
 
-  LINES.forEach(l => {
+  shown().forEach(l => {
     ctx.strokeStyle = l.color; ctx.fillStyle = l.color; ctx.lineWidth = 2; ctx.beginPath();
     let on = false;
     days.forEach((d,i) => {
@@ -346,10 +367,10 @@ function draw(hover){
 
   if (hover != null) {
     ctx.strokeStyle = '#6b7280'; ctx.lineWidth = 1; ctx.beginPath(); ctx.moveTo(X(hover),m.t); ctx.lineTo(X(hover),H-m.b); ctx.stroke();
-    LINES.forEach(l => { const v = val(days[hover], l.field); if (!isNaN(v)) { ctx.fillStyle = l.color; ctx.beginPath(); ctx.arc(X(hover),Y(v),5,0,7); ctx.fill(); } });
+    shown().forEach(l => { const v = val(days[hover], l.field); if (!isNaN(v)) { ctx.fillStyle = l.color; ctx.beginPath(); ctx.arc(X(hover),Y(v),5,0,7); ctx.fill(); } });
     if (CMP && prev && prev[hover]) {
       ctx.save(); ctx.globalAlpha = 0.5;
-      LINES.forEach(l => { const v = val(prev[hover], l.field); if (!isNaN(v)) { ctx.fillStyle = l.color; ctx.beginPath(); ctx.arc(X(hover),Y(v),4,0,7); ctx.fill(); } });
+      shown().forEach(l => { const v = val(prev[hover], l.field); if (!isNaN(v)) { ctx.fillStyle = l.color; ctx.beginPath(); ctx.arc(X(hover),Y(v),4,0,7); ctx.fill(); } });
       ctx.restore();
     }
   }
@@ -361,11 +382,11 @@ function showTip(e){
   const i = Math.max(0, Math.min(n-1, Math.round((x-m.l)/((W-m.l-m.r)/Math.max(1,n-1)))));
   draw(i);
   const tip = $('tip');
-  tip.innerHTML = `<b>${days[i].day}</b><br>` + LINES.map(l => {
+  tip.innerHTML = `<b>${days[i].day}</b><br>` + shown().map(l => {
     const v = val(days[i], l.field);
     return `<span style="color:${l.color}">●</span> ${l.name}: ${isNaN(v) ? '–' : v}`;
   }).join('<br>') + (CMP && prev && prev[i]
-    ? `<br><b style="opacity:.7">${prev[i].day}</b><br>` + LINES.map(l => {
+    ? `<br><b style="opacity:.7">${prev[i].day}</b><br>` + shown().map(l => {
         const v = val(prev[i], l.field);
         return `<span style="color:${l.color};opacity:.55">●</span> ${l.name.replace(' [°C]','')}: ${isNaN(v) ? '–' : v}`;
       }).join('<br>')
@@ -414,10 +435,17 @@ $('tPrev').onclick = () => stepThr(-THR_STEP);
 $('tNext').onclick = () => stepThr(THR_STEP);
 
 $('cmpIn').checked = CMP;
+$('seriesBox').hidden = !CMP;
+document.querySelector(`input[name="series"][value="${FIELD}"]`).checked = true;
+$('seriesBox').addEventListener('change', e => {
+  FIELD = e.target.value;
+  updateUrl(); renderLegend(); draw();
+});
 $('cmpIn').addEventListener('change', () => {
   CMP = $('cmpIn').checked;
+  $('seriesBox').hidden = !CMP;
   updateUrl();
-  if (CMP) loadPrev(reqId); else { prev = null; $('cmpStatus').textContent = ''; renderLegend(); draw(); }
+  if (CMP) { renderLegend(); draw(); loadPrev(reqId); } else { prev = null; $('cmpStatus').textContent = ''; renderLegend(); draw(); }
 });
 
 setN(N);
