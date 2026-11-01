@@ -35,6 +35,9 @@
   .spin button:last-child{border-radius:0 8px 8px 0}
   .spin button:hover,.spin .daysIn:focus{position:relative;z-index:1}
   .spin button:active{transform:none;background:#1d4ed8}
+  .cmp{display:flex;align-items:center;gap:8px;font-size:14px;cursor:pointer;user-select:none;min-height:44px}
+  .cmp input{width:20px;height:20px;margin:0;accent-color:#2563eb;cursor:pointer}
+  #cmpStatus{font-size:12px;color:#9ca3af;margin-top:4px;min-height:16px}
   .presets{display:flex;gap:6px;flex-wrap:wrap}
   .presets button{height:36px;padding:0 12px;font-size:14px;border:1px solid #374151;border-radius:8px;background:#111827;color:#e5e7eb;cursor:pointer}
   .presets button:hover,.presets button.on{background:#2563eb;border-color:#2563eb}
@@ -87,8 +90,10 @@
         <button id="tNext" title="Więcej o 0,5">+</button>
       </div>
     </div>
+    <label class="cmp"><input type="checkbox" id="cmpIn"> Porównaj z poprzednim rokiem</label>
   </div>
   <div id="status"></div>
+  <div id="cmpStatus"></div>
   <div id="stats"></div>
   <div id="months"></div>
 </div>
@@ -130,6 +135,8 @@ let N = Number(new URLSearchParams(location.search).get('days')) || 30;
 const _qs = new URLSearchParams(location.search);
 let THR = _qs.has('x') && _qs.get('x') !== '' && isFinite(Number(_qs.get('x'))) ? Number(_qs.get('x')) : 10;
 const PRESETS = [7, 14, 30, 60, 90, 180, 365];
+let CMP = _qs.get('cmp') === '1';   // porównanie z rokiem wcześniejszym
+let prev = null;                    // tablica równoległa do days: dane z tego samego dnia rok wcześniej
 
 const LINES = [
   {field:'tempMax', name:'Temperatura max [°C]',     color:'#ef4444'},
@@ -187,7 +194,41 @@ function setN(v){
   load();
 }
 
-function updateUrl(){ history.replaceState(null, '', `?days=${N}` + (isNaN(THR) ? '' : `&x=${THR}`)); }
+function updateUrl(){ history.replaceState(null, '', `?days=${N}` + (isNaN(THR) ? '' : `&x=${THR}`) + (CMP ? '&cmp=1' : '')); }
+
+// ten sam dzień kalendarzowy rok wcześniej (29 lutego -> 28 lutego)
+function prevKey(day){
+  const y = Number(day.slice(0,4)) - 1, md = day.slice(5);
+  return `${y}-${md === '02-29' ? '02-28' : md}`;
+}
+const parseISO = k => { const [y,m,d] = k.split('-').map(Number); return new Date(y, m-1, d); };
+
+function renderLegend(){
+  $('legend').innerHTML = LINES.map(l => `<span><i style="background:${l.color}"></i>${l.name}</span>`).join('') +
+    (CMP ? `<span style="opacity:.55"><i style="background:#ef4444;width:5px;margin-right:2px"></i><i style="background:#facc15;width:5px;margin-right:2px"></i><i style="background:#38bdf8;width:5px"></i>&nbsp;rok wcześniej</span>` : '');
+}
+
+// pobiera dane sprzed roku dla bieżącego zakresu i ustawia 'prev' (wyrównane indeksami do 'days')
+async function loadPrev(id){
+  prev = null;
+  const box = $('cmpStatus');
+  if (!CMP || !days.length) { box.textContent = ''; renderLegend(); return; }
+  box.textContent = 'Pobieram dane sprzed roku...';
+  const fromP = prevKey(days[0].day), toP = prevKey(days[days.length-1].day);
+  const list = monthsBetween(parseISO(fromP), parseISO(toP));
+  let errs = 0, firstErr = '';
+  const res = await Promise.all(list.map(x => fetchMonth(x.year, x.month).catch(e => { errs++; firstErr = firstErr || e.message; return []; })));
+  if (id !== reqId || !CMP) return;
+  const map = new Map(res.flat().map(d => [d.day, d]));
+  prev = days.map(d => map.get(prevKey(d.day)) || null);
+  const have = prev.filter(Boolean).length;
+  box.style.color = errs || !have ? '#f87171' : '#9ca3af';
+  box.textContent = have
+    ? `Rok wcześniej: ${have} z ${days.length} dni z danymi (${fromP} → ${toP}).` + (errs ? ` Nie udało się pobrać ${errs} mies.` : '')
+    : 'Brak danych sprzed roku dla tego zakresu.' + (firstErr ? ' Szczegóły: ' + firstErr : '');
+  renderLegend();
+  draw();
+}
 
 function renderMonths(list){
   $('months').innerHTML = `<span style="color:#e5e7eb;border:none;background:none;padding-left:0">Pobrane miesiące (${list.length}):</span>` +
@@ -203,6 +244,7 @@ async function load(){
   renderMonths(list);
   status(`Pobieram dane: ${N} dni (${iso(from)} → ${iso(to)}), potrzeba ${list.length} ${list.length===1?'miesiąca':'miesięcy'}...`);
   $('stats').textContent = '';
+  prev = null; $('cmpStatus').textContent = '';
 
   const results = await Promise.all(list.map((x, i) =>
     fetchMonth(x.year, x.month)
@@ -235,8 +277,9 @@ async function load(){
     `<span style="color:#ef4444">max ${hi}°</span> (${dayOf('tempMax', hi)}) &nbsp;·&nbsp; ` +
     `<span style="color:#38bdf8">min ${lo}°</span> (${dayOf('tempMin', lo)}) &nbsp;·&nbsp; ` +
     `<span style="color:#facc15">średnia ${mean.toFixed(1)}°</span>`;
-  $('legend').innerHTML = LINES.map(l => `<span><i style="background:${l.color}"></i>${l.name}</span>`).join('');
+  renderLegend();
   draw();
+  loadPrev(id);
 }
 
 const cv = $('cv'), ctx = cv.getContext('2d');
@@ -249,6 +292,7 @@ function draw(hover){
 
   const m = {l:50, r:20, t:20, b:45}, n = days.length;
   const all = LINES.flatMap(l => days.map(d => val(d, l.field))).filter(v => !isNaN(v));
+  if (CMP && prev) LINES.forEach(l => prev.forEach(d => { const v = d ? val(d, l.field) : NaN; if (!isNaN(v)) all.push(v); }));
   if (!isNaN(THR)) all.push(THR);
   const lo = Math.floor(Math.min(...all) - 1), hi = Math.ceil(Math.max(...all) + 1);
   const X = i => m.l + (n === 1 ? 0 : i*(W-m.l-m.r)/(n-1));
@@ -272,6 +316,22 @@ function draw(hover){
     ctx.fillText(THR + '°', W-m.r-4, Y(THR) - 5); ctx.font = '12px system-ui';
   }
 
+  // rok wcześniej: te same kolory, półprzezroczyste, pod liniami bieżącymi
+  if (CMP && prev) {
+    ctx.save(); ctx.globalAlpha = 0.4;
+    LINES.forEach(l => {
+      ctx.strokeStyle = l.color; ctx.fillStyle = l.color; ctx.lineWidth = 2; ctx.beginPath();
+      let on = false;
+      prev.forEach((d,i) => {
+        const v = d ? val(d, l.field) : NaN;
+        if (isNaN(v)) { on = false; return; }
+        on ? ctx.lineTo(X(i),Y(v)) : ctx.moveTo(X(i),Y(v)); on = true;
+      });
+      ctx.stroke();
+    });
+    ctx.restore();
+  }
+
   LINES.forEach(l => {
     ctx.strokeStyle = l.color; ctx.fillStyle = l.color; ctx.lineWidth = 2; ctx.beginPath();
     let on = false;
@@ -287,6 +347,11 @@ function draw(hover){
   if (hover != null) {
     ctx.strokeStyle = '#6b7280'; ctx.lineWidth = 1; ctx.beginPath(); ctx.moveTo(X(hover),m.t); ctx.lineTo(X(hover),H-m.b); ctx.stroke();
     LINES.forEach(l => { const v = val(days[hover], l.field); if (!isNaN(v)) { ctx.fillStyle = l.color; ctx.beginPath(); ctx.arc(X(hover),Y(v),5,0,7); ctx.fill(); } });
+    if (CMP && prev && prev[hover]) {
+      ctx.save(); ctx.globalAlpha = 0.5;
+      LINES.forEach(l => { const v = val(prev[hover], l.field); if (!isNaN(v)) { ctx.fillStyle = l.color; ctx.beginPath(); ctx.arc(X(hover),Y(v),4,0,7); ctx.fill(); } });
+      ctx.restore();
+    }
   }
 }
 
@@ -299,7 +364,12 @@ function showTip(e){
   tip.innerHTML = `<b>${days[i].day}</b><br>` + LINES.map(l => {
     const v = val(days[i], l.field);
     return `<span style="color:${l.color}">●</span> ${l.name}: ${isNaN(v) ? '–' : v}`;
-  }).join('<br>');
+  }).join('<br>') + (CMP && prev && prev[i]
+    ? `<br><b style="opacity:.7">${prev[i].day}</b><br>` + LINES.map(l => {
+        const v = val(prev[i], l.field);
+        return `<span style="color:${l.color};opacity:.55">●</span> ${l.name.replace(' [°C]','')}: ${isNaN(v) ? '–' : v}`;
+      }).join('<br>')
+    : '');
   tip.style.display = 'block';
   const tw = tip.offsetWidth, th = tip.offsetHeight;
   // na dotyku dymek nad palcem, przy myszy obok kursora
@@ -342,6 +412,13 @@ function stepThr(d){
 }
 $('tPrev').onclick = () => stepThr(-THR_STEP);
 $('tNext').onclick = () => stepThr(THR_STEP);
+
+$('cmpIn').checked = CMP;
+$('cmpIn').addEventListener('change', () => {
+  CMP = $('cmpIn').checked;
+  updateUrl();
+  if (CMP) loadPrev(reqId); else { prev = null; $('cmpStatus').textContent = ''; renderLegend(); draw(); }
+});
 
 setN(N);
 </script>
