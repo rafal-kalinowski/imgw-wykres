@@ -330,6 +330,12 @@ function draw(hover){
   const every = Math.max(1, Math.ceil(n / Math.max(3, Math.min(15, Math.floor((W-m.l-m.r)/55)))));
   for (let i = 0; i < n; i += every) ctx.fillText(days[0].day.slice(0,4) !== days[n-1].day.slice(0,4) ? days[i].day.slice(2) : days[i].day.slice(5), X(i), H-m.b+18);
 
+  // stała linia 0°C: biała, ciągła, rysowana tylko gdy 0 mieści się w zakresie osi
+  if (lo <= 0 && hi >= 0) {
+    ctx.save(); ctx.strokeStyle = '#ffffff'; ctx.lineWidth = 1.5;
+    ctx.beginPath(); ctx.moveTo(m.l, Y(0)); ctx.lineTo(W-m.r, Y(0)); ctx.stroke(); ctx.restore();
+  }
+
   if (!isNaN(THR)) {
     ctx.save(); ctx.strokeStyle = '#ffffff'; ctx.lineWidth = 1.5; ctx.setLineDash([6,5]);
     ctx.beginPath(); ctx.moveTo(m.l, Y(THR)); ctx.lineTo(W-m.r, Y(THR)); ctx.stroke(); ctx.restore();
